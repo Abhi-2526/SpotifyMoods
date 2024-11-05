@@ -343,6 +343,114 @@ async def get_featured_songs(
         logger.error(f"Error in get_featured_songs: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+class PaginatedResponse(BaseModel):
+    items: List[SongResponse]
+    total: int
+    page: int
+    size: int
+    total_pages: int
+
+
+@app.get("/songs/search_with_filters", response_model=PaginatedResponse)
+async def search_with_filters(
+        query: Optional[str] = None,
+        moods: Optional[List[str]] = Query(None),
+        page: int = Query(default=1, gt=0),
+        size: int = Query(default=10, gt=0, le=50),
+        min_confidence: float = Query(default=0.5, gt=0, le=1)
+):
+    """
+    Search songs with optional text query and mood filters, with pagination
+    """
+    try:
+        # Calculate offset
+        from_value = (page - 1) * size
+
+        # Build the query
+        must_conditions = []
+
+        # Add text search if query provided
+        if query:
+            must_conditions.append({
+                "multi_match": {
+                    "query": query,
+                    "fields": ["title^3", "artist^2", "album"],
+                    "fuzziness": "AUTO",
+                    "operator": "or"
+                }
+            })
+
+        # Add mood filters if provided
+        if moods:
+            mood_conditions = []
+            for mood_slug in moods:
+                mood = map_slug_to_mood(mood_slug)
+                mood_conditions.append({
+                    "nested": {
+                        "path": "moods",
+                        "query": {
+                            "bool": {
+                                "must": [
+                                    {"term": {"moods.mood": mood}},
+                                    {"range": {"moods.confidence": {"gte": min_confidence}}}
+                                ]
+                            }
+                        }
+                    }
+                })
+            if mood_conditions:
+                must_conditions.append({
+                    "bool": {
+                        "should": mood_conditions,
+                        "minimum_should_match": 1
+                    }
+                })
+
+        # If no conditions, match all
+        if not must_conditions:
+            must_conditions.append({"match_all": {}})
+
+        # Build the final query
+        search_query = {
+            "query": {
+                "bool": {
+                    "must": must_conditions
+                }
+            },
+            "from": from_value,
+            "size": size,
+            "sort": [
+                "_score",
+                {"popularity": "desc"}
+            ]
+        }
+
+        # Execute search
+        response = es.search(
+            index="songs",
+            body=search_query
+        )
+
+        # Calculate pagination info
+        total_hits = response["hits"]["total"]["value"]
+        total_pages = (total_hits + size - 1) // size
+
+        # Format response
+        return {
+            "items": [hit["_source"] for hit in response["hits"]["hits"]],
+            "total": total_hits,
+            "page": page,
+            "size": size,
+            "total_pages": total_pages
+        }
+
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Error in search_with_filters: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/debug/mapping")
 async def get_index_mapping():
     """Get the current index mapping for debugging"""
