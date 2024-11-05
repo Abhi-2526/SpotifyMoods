@@ -3,8 +3,8 @@
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import time
-import random
 import string
+import secrets
 
 
 def collect_random_track_ids(target_count=10000):
@@ -63,9 +63,9 @@ def collect_random_track_ids(target_count=10000):
 
 def generate_random_query():
     # Generate a random string of 1 or 2 characters
-    length = random.choice([1, 2])
+    length = secrets.choice([1, 2])
     letters = string.ascii_lowercase + string.digits
-    random_query = ''.join(random.choice(letters) for _ in range(length))
+    random_query = ''.join(secrets.choice(letters) for _ in range(length))
     return random_query
 
 

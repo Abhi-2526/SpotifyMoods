@@ -1,7 +1,6 @@
 import os
 import math
 import json
-import random
 from datetime import datetime
 
 import joblib
@@ -17,10 +16,11 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
 from torch.utils.data import Dataset
+import secrets
 
 # For reproducibility
 def set_seed(seed=42):
-    random.seed(seed)
+    secrets.SystemRandom().seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
