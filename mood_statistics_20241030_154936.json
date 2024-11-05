@@ -1,0 +1,17 @@
+{
+  "total_songs": 114000,
+  "mood_distribution": {
+    "Energetic": 38192,
+    "Danceable": 22631,
+    "Dark": 21307,
+    "Acoustic": 16529,
+    "Melancholic": 7027,
+    "Electronic": 5162,
+    "Dark Dance": 1403,
+    "Upbeat": 902,
+    "Calm": 487,
+    "Moderate Energy": 360
+  },
+  "successful_indexes": 113999,
+  "failed_indexes": 1
+}
