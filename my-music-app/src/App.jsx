@@ -1,5 +1,5 @@
 import React, { useState, useEffect, memo, useCallback } from 'react';
-import { Search, Music, Star, Heart, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Music, Star, Heart } from 'lucide-react';
 
 // API URL constant
 const API_URL = 'http://localhost:8000';
@@ -108,226 +108,217 @@ function MusicApp() {
   const [viewMode, setViewMode] = useState('featured'); // 'featured', 'filtered', or 'similar'
 
   // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [searchAfterStack, setSearchAfterStack] = useState([]);
+  const [currentSearchAfter, setCurrentSearchAfter] = useState(null);
   const [totalItems, setTotalItems] = useState(0);
+  const [resultsCount, setResultsCount] = useState(0); // Number of results shown so far
   const pageSize = 12;
 
   // Fetch songs function
-  // Fetch songs function
-const fetchSongs = async (endpoint, params = {}) => {
-  setLoading(true);
-  setError(null);
+  const fetchSongs = async (endpoint, body = {}) => {
+    setLoading(true);
+    setError(null);
 
-  const baseUrl = `${API_URL}${endpoint}`;
-  const searchParams = new URLSearchParams();
+    const url = `${API_URL}${endpoint}`;
 
-  Object.entries(params).forEach(([key, value]) => {
-    if (Array.isArray(value)) {
-      value.forEach(v => searchParams.append(key, v));
-    } else if (value !== undefined && value !== null) {
-      searchParams.append(key, value);
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || `HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      setSongs(data.items || []);
+      setTotalItems(data.total || 0);
+      setCurrentSearchAfter(data.search_after || null);
+
+      // Update results count
+      if (body.search_after) {
+        setResultsCount(prev => prev + data.items.length);
+      } else {
+        setResultsCount(data.items.length);
+      }
+
+      // Update searchAfterStack for previous pages
+      if (body.search_after) {
+        setSearchAfterStack((prev) => [...prev, body.search_after]);
+      } else {
+        setSearchAfterStack([]);
+      }
+
+    } catch (err) {
+      console.error('Error fetching songs:', err);
+      setError(`Failed to fetch songs: ${err.message}`);
+      setSongs([]);
+    } finally {
+      setLoading(false);
     }
-  });
-
-  const url = `${baseUrl}${searchParams.toString() ? '?' + searchParams.toString() : ''}`;
-  console.log('Fetching from:', url);
-
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => null);
-      throw new Error(errorData?.detail || `HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    // Handle different response formats
-    if (endpoint === '/songs/similar' || endpoint.startsWith('/songs/similar/')) {
-      // Similar songs endpoint returns array directly
-      setSongs(data || []);
-      setTotalPages(1);
-      setTotalItems(data?.length || 0);
-      setCurrentPage(1);
-    } else if (endpoint === '/songs/featured') {
-      // Featured songs endpoint returns array directly
-      setSongs(data || []);
-      setTotalPages(Math.ceil((data?.length || 0) / pageSize));
-      setTotalItems(data?.length || 0);
-      setCurrentPage(params.page || 1);
-    } else {
-      // Search and filtered endpoints return paginated response
-      setSongs(data.items || data || []);
-      setTotalPages(data.total_pages || Math.ceil((data?.length || 0) / pageSize));
-      setTotalItems(data.total || data?.length || 0);
-      setCurrentPage(data.page || params.page || 1);
-    }
-  } catch (err) {
-    console.error('Error fetching songs:', err);
-    setError(`Failed to fetch songs: ${err.message}`);
-    setSongs([]);
-  } finally {
-    setLoading(false);
-  }
-};
-
+  };
 
   // Memoized fetch function for filtered songs
-  const fetchFilteredSongs = useCallback(() => {
-    const params = {
-      page: currentPage,
+  const fetchFilteredSongs = useCallback((searchAfter = null, moods = selectedMoodSlugs) => {
+    const body = {
       size: pageSize,
+      query: searchTerm.trim() || undefined,
+      moods: moods.length > 0 ? moods : undefined,
+      search_after: searchAfter,
     };
 
-    if (searchTerm.trim()) {
-      params.query = searchTerm.trim();
-    }
-
-    if (selectedMoodSlugs.length > 0) {
-      params.moods = selectedMoodSlugs;
-    }
-
-    fetchSongs('/songs/search_with_filters', params);
-  }, [currentPage, pageSize, searchTerm, selectedMoodSlugs]);
+    fetchSongs('/songs/search_with_filters', body);
+  }, [pageSize, searchTerm, fetchSongs]);
 
   // Event handlers
   const handleSearch = (e) => {
     e?.preventDefault();
-    setCurrentPage(1);
+    setViewMode('filtered');
+    setCurrentSearchAfter(null);
+    setResultsCount(0);
+    fetchFilteredSongs(null, selectedMoodSlugs);
   };
 
   const handleMoodSelection = (moodSlug) => {
-    setSelectedMoodSlugs(prev => {
-      if (prev.includes(moodSlug)) {
-        return prev.filter(m => m !== moodSlug);
-      }
-      if (prev.length < 3) {
-        return [...prev, moodSlug];
-      }
-      return prev;
-    });
-    setCurrentPage(1);
-  };
-
-  const handlePageChange = (newPage) => {
-    setCurrentPage(newPage);
-  };
-
-  const handleSongSelect = async (song) => {
-  setSelectedSong(song);
-  setViewMode('similar');
-  setCurrentPage(1);
-
-  try {
-    await fetchSongs(`/songs/similar/${song.track_id}`);
-  } catch (err) {
-    console.error('Error fetching similar songs:', err);
-    setError('Failed to fetch similar songs');
-  }
-};
-
-const handleBackToMain = () => {
-  setSelectedSong(null);
-  setViewMode('featured');
-  setCurrentPage(1);
-  fetchSongs('/songs/featured');
-};
-
-// Initial load effect
-useEffect(() => {
-  fetchSongs('/songs/featured');
-}, []);
-
-// Main effect for search and filters
-useEffect(() => {
-  if (viewMode === 'similar') return;
-
-  const timeoutId = setTimeout(() => {
-    if (searchTerm || selectedMoodSlugs.length > 0) {
-      setViewMode('filtered');
-      fetchFilteredSongs();
+    // Compute new moods before updating state
+    let newSelectedMoods;
+    if (selectedMoodSlugs.includes(moodSlug)) {
+      newSelectedMoods = selectedMoodSlugs.filter(m => m !== moodSlug);
+    } else if (selectedMoodSlugs.length < 3) {
+      newSelectedMoods = [...selectedMoodSlugs, moodSlug];
     } else {
-      setViewMode('featured');
-      fetchSongs('/songs/featured', { page: currentPage });
+      newSelectedMoods = selectedMoodSlugs;
     }
-  }, 300);
 
-  return () => clearTimeout(timeoutId);
-}, [fetchFilteredSongs, searchTerm, selectedMoodSlugs.length, currentPage, viewMode]);
+    setSelectedMoodSlugs(newSelectedMoods);
+    setViewMode('filtered');
+    setCurrentSearchAfter(null);
+    setResultsCount(0);
+
+    // Fetch songs with the updated moods
+    fetchFilteredSongs(null, newSelectedMoods);
+  };
+
+  const handleNextPage = () => {
+    if (viewMode === 'similar' && selectedSong) {
+      fetchSongs(`/songs/similar/${selectedSong.track_id}`, {
+        size: pageSize,
+        search_after: currentSearchAfter,
+      });
+    } else if (viewMode === 'featured') {
+      fetchSongs('/songs/featured', {
+        size: pageSize,
+        search_after: currentSearchAfter,
+      });
+    } else if (viewMode === 'filtered') {
+      fetchFilteredSongs(currentSearchAfter, selectedMoodSlugs);
+    }
+  };
+
+  const handlePreviousPage = () => {
+    const previousSearchAfterStack = [...searchAfterStack];
+    previousSearchAfterStack.pop(); // Remove current search_after
+    const prevSearchAfter = previousSearchAfterStack.pop() || null; // Get previous search_after
+
+    setSearchAfterStack(previousSearchAfterStack);
+    setCurrentSearchAfter(prevSearchAfter);
+
+    // Update results count
+    setResultsCount(prev => prev - songs.length);
+
+    if (viewMode === 'similar' && selectedSong) {
+      fetchSongs(`/songs/similar/${selectedSong.track_id}`, {
+        size: pageSize,
+        search_after: prevSearchAfter,
+      });
+    } else if (viewMode === 'featured') {
+      fetchSongs('/songs/featured', {
+        size: pageSize,
+        search_after: prevSearchAfter,
+      });
+    } else if (viewMode === 'filtered') {
+      fetchFilteredSongs(prevSearchAfter, selectedMoodSlugs);
+    }
+  };
+
+  const handleSongSelect = (song) => {
+    setSelectedSong(song);
+    setViewMode('similar');
+    setCurrentSearchAfter(null);
+    setSearchAfterStack([]);
+    setResultsCount(0);
+    fetchSongs(`/songs/similar/${song.track_id}`, {
+      size: pageSize
+    });
+  };
+
+  const handleBackToMain = () => {
+    setSelectedSong(null);
+    setViewMode('featured');
+    setCurrentSearchAfter(null);
+    setSearchAfterStack([]);
+    setSelectedMoodSlugs([]);
+    setSearchTerm('');
+    setResultsCount(0);
+    fetchSongs('/songs/featured', {
+      size: pageSize
+    });
+  };
+
+  // Initial load effect
+  useEffect(() => {
+    // On initial load, set viewMode to 'featured' and fetch featured songs
+    setViewMode('featured');
+    setCurrentSearchAfter(null);
+    setSearchAfterStack([]);
+    setResultsCount(0);
+    fetchSongs('/songs/featured', {
+      size: pageSize
+    });
+  }, []);
+
   // Pagination component
-  const Pagination = () => (
-    <div className="flex items-center justify-between px-4 py-3 sm:px-6">
-      <div className="flex justify-between sm:hidden">
-        <button
-          onClick={() => handlePageChange(currentPage - 1)}
-          disabled={currentPage === 1}
-          className="relative inline-flex items-center px-4 py-2 text-sm font-medium rounded-md text-gray-700 bg-white border border-gray-300 disabled:opacity-50"
-        >
-          Previous
-        </button>
-        <button
-          onClick={() => handlePageChange(currentPage + 1)}
-          disabled={currentPage === totalPages}
-          className="ml-3 relative inline-flex items-center px-4 py-2 text-sm font-medium rounded-md text-gray-700 bg-white border border-gray-300 disabled:opacity-50"
-        >
-          Next
-        </button>
-      </div>
-      <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
-        <div>
-          <p className="text-sm text-gray-700">
-            Showing{' '}
-            <span className="font-medium">
-              {Math.min((currentPage - 1) * pageSize + 1, totalItems)}
-            </span>
-            {' '}-{' '}
-            <span className="font-medium">
-              {Math.min(currentPage * pageSize, totalItems)}
-            </span>
-            {' '}of{' '}
-            <span className="font-medium">{totalItems}</span> results
-          </p>
+  const Pagination = () => {
+    const hasNextPage = currentSearchAfter !== null;
+    const hasPreviousPage = searchAfterStack.length > 0;
+
+    return (
+      <div className="flex flex-col items-center justify-between px-4 py-3 sm:px-6">
+        <div className="text-sm text-gray-700 mb-2">
+          Showing{' '}
+          <span className="font-medium">
+            {resultsCount - songs.length + 1}
+          </span>
+          {' '} - {' '}
+          <span className="font-medium">
+            {resultsCount}
+          </span>
+          {' '} of {' '}
+          <span className="font-medium">{totalItems}</span> results
         </div>
         <div>
-          <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
-            <button
-              onClick={() => handlePageChange(currentPage - 1)}
-              disabled={currentPage === 1}
-              className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-            {[...Array(Math.min(5, totalPages))].map((_, idx) => {
-              const pageNumber = currentPage - 2 + idx;
-              if (pageNumber > 0 && pageNumber <= totalPages) {
-                return (
-                  <button
-                    key={pageNumber}
-                    onClick={() => handlePageChange(pageNumber)}
-                    className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
-                      currentPage === pageNumber
-                        ? 'z-10 bg-indigo-50 border-indigo-500 text-indigo-600'
-                        : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
-                    }`}
-                  >
-                    {pageNumber}
-                  </button>
-                );
-              }
-              return null;
-            })}
-            <button
-              onClick={() => handlePageChange(currentPage + 1)}
-              disabled={currentPage === totalPages}
-              className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
-            >
-              <ChevronRight className="h-5 w-5" />
-            </button>
-          </nav>
+          <button
+            onClick={handlePreviousPage}
+            disabled={!hasPreviousPage}
+            className="relative inline-flex items-center px-4 py-2 mr-2 text-sm font-medium rounded-md text-gray-700 bg-white border border-gray-300 disabled:opacity-50"
+          >
+            Previous
+          </button>
+          <button
+            onClick={handleNextPage}
+            disabled={!hasNextPage}
+            className="relative inline-flex items-center px-4 py-2 text-sm font-medium rounded-md text-gray-700 bg-white border border-gray-300 disabled:opacity-50"
+          >
+            Next
+          </button>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -395,7 +386,7 @@ useEffect(() => {
                 ))}
               </div>
               <div className="mt-2 text-sm text-gray-500">
-                Select up to 3 moods to filter songs. Results will show songs matching any of the selected moods.
+                Select up to 3 moods to filter songs. Results will show songs matching all of the selected moods.
               </div>
             </div>
           </>
@@ -436,7 +427,9 @@ useEffect(() => {
             </div>
 
             {/* Pagination */}
-            {songs.length > 0 && <Pagination />}
+            {songs.length > 0 && (
+              <Pagination />
+            )}
 
             {/* No Results Message */}
             {!loading && songs.length === 0 && (
