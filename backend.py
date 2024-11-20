@@ -1,18 +1,21 @@
 from fastapi import FastAPI, HTTPException, Body, Query
 from elasticsearch import Elasticsearch, NotFoundError
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import math
 from pydantic import BaseModel
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 import logging
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
+import os
 
 app = FastAPI(title="Music Search API")
 
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with your frontend URL
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -20,6 +23,9 @@ app.add_middleware(
 
 # Initialize Elasticsearch client
 es = Elasticsearch([{'host': 'localhost', 'port': 9200, 'scheme': 'http'}])
+
+# Initialize Spotipy client (will be set up in startup event)
+sp = None
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -55,12 +61,13 @@ class SongResponse(BaseModel):
     audio_features: dict
     popularity: int
     genre: Optional[str] = None
+    spotify_url: Optional[str] = None
 
 class PaginatedResponse(BaseModel):
     items: List[SongResponse]
     total: int
     size: int
-    search_after: Optional[List] = None  # Used for `search_after` pagination
+    search_after: Optional[List] = None
     sort_field: str
     sort_order: str
 
@@ -73,7 +80,7 @@ def create_feature_vector(features):
     key_sin = math.sin(key_angle)
     key_cos = math.cos(key_angle)
 
-    return [
+    vector = [
         features['danceability'],
         features['energy'],
         features['valence'],
@@ -88,6 +95,16 @@ def create_feature_vector(features):
         key_cos
     ]
 
+    # Normalize the vector to unit length (L2 normalization)
+    norm = math.sqrt(sum(x ** 2 for x in vector))
+    if norm == 0:
+        normalized_vector = vector  # Avoid division by zero
+    else:
+        normalized_vector = [x / norm for x in vector]
+
+    return normalized_vector
+
+
 def map_slug_to_mood(slug: str) -> str:
     """Map a slug to its corresponding mood name."""
     mood = SLUG_TO_MOOD.get(slug.lower())
@@ -95,6 +112,19 @@ def map_slug_to_mood(slug: str) -> str:
         logger.warning(f"Invalid mood slug received: {slug}")
         raise HTTPException(status_code=400, detail=f"Invalid mood slug: {slug}")
     return mood
+
+def fetch_spotify_url(title: str, artist: str) -> Optional[str]:
+    try:
+        query = f"track:{title} artist:{artist}"
+        results = sp.search(q=query, type='track', limit=1)
+        tracks = results.get('tracks', {}).get('items', [])
+        if tracks:
+            return tracks[0]['external_urls']['spotify']
+        else:
+            return None
+    except Exception as e:
+        logger.error(f"Error fetching Spotify URL for {title} by {artist}: {str(e)}")
+        return None
 
 @app.post("/songs/search_with_filters", response_model=PaginatedResponse)
 async def search_with_filters(
@@ -141,11 +171,7 @@ async def search_with_filters(
                     }
                 })
             # Use a bool must to require all moods
-            must_conditions.append({
-                "bool": {
-                    "must": nested_must_conditions
-                }
-            })
+            must_conditions.extend(nested_must_conditions)
 
         # If no conditions, match all
         if not must_conditions:
@@ -177,14 +203,21 @@ async def search_with_filters(
 
         # Extract sort values for the last hit
         hits = response["hits"]["hits"]
+        items = []
         if hits:
             last_sort = hits[-1]["sort"]
+            # Fetch Spotify URLs and append to items
+            for hit in hits:
+                song = hit["_source"]
+                spotify_url = fetch_spotify_url(song['title'], song['artist'])
+                song['spotify_url'] = spotify_url
+                items.append(song)
         else:
             last_sort = None
 
         # Format response
         return {
-            "items": [hit["_source"] for hit in hits],
+            "items": items,
             "total": response["hits"]["total"]["value"],
             "size": size,
             "sort_field": sort_field,
@@ -239,13 +272,20 @@ async def get_featured_songs(
         )
 
         hits = response["hits"]["hits"]
+        items = []
         if hits:
             last_sort = hits[-1]["sort"]
+            # Fetch Spotify URLs and append to items
+            for hit in hits:
+                song = hit["_source"]
+                spotify_url = fetch_spotify_url(song['title'], song['artist'])
+                song['spotify_url'] = spotify_url
+                items.append(song)
         else:
             last_sort = None
 
         return {
-            "items": [hit["_source"] for hit in hits],
+            "items": items,
             "total": response["hits"]["total"]["value"],
             "size": size,
             "sort_field": sort_field,
@@ -262,73 +302,84 @@ async def get_similar_songs(
         body: dict = Body(...)
 ):
     """
-    Get similar songs based on audio features using cosine similarity, using search_after for pagination
+    Get similar songs based on audio features using cosine similarity, with a threshold, and using search_after for pagination
     """
     try:
         size = body.get('size', 12)
         search_after = body.get('search_after')
-        min_score = body.get('min_score', 0.7)
+        min_score = body.get('min_score', 0.8)
 
-        # First, get the source song
+        # Fetch the target song
         try:
-            source_song = es.get(index="songs", id=track_id)
+            target_song = es.get(index="songs", id=track_id)['_source']
         except NotFoundError:
-            raise HTTPException(status_code=404, detail="Song not found")
+            raise HTTPException(status_code=404, detail="Track ID not found")
 
-        # Get the feature vector of the source song
-        source_vector = source_song["_source"]["feature_vector"]
+        # Create the feature vector for the target song
+        target_vector = create_feature_vector(target_song['audio_features'])
 
-        # Search for similar songs using cosine similarity
-        query = {
-            "script_score": {
-                "query": {"bool": {"must_not": {"term": {"track_id": track_id}}}},
-                "script": {
-                    "source": "cosineSimilarity(params.query_vector, 'feature_vector') + 1.0",
-                    "params": {"query_vector": source_vector}
-                }
-            }
-        }
-
+        # Build the Elasticsearch query
         search_query = {
-            "query": query,
             "size": size,
-            "min_score": min_score,
+            "query": {
+                "script_score": {
+                    "query": {
+                        "bool": {
+                            "must": {"match_all": {}},
+                            "must_not": {
+                                "term": {"track_id": track_id}
+                            }
+                        }
+                    },
+                    "script": {
+                        "source": "(cosineSimilarity(params.target_vector, 'feature_vector') + 1.0) / 2.0",
+                        "params": {"target_vector": target_vector}
+                    }
+                }
+            },
             "sort": [
-                {"_score": "desc"},
+                {"_score": {"order": "desc"}},
                 {"track_id": "asc"}  # Ensure uniqueness
             ],
+            "min_score": min_score,
             "track_total_hits": True
         }
 
         if search_after:
             search_query["search_after"] = search_after
 
+        # Execute the search
         response = es.search(
             index="songs",
             body=search_query
         )
 
         hits = response["hits"]["hits"]
+        items = []
         if hits:
             last_sort = hits[-1]["sort"]
+            # Append Spotify URLs to items
+            for hit in hits:
+                song = hit["_source"]
+                spotify_url = fetch_spotify_url(song['title'], song['artist'])
+                song['spotify_url'] = spotify_url
+                items.append(song)
         else:
             last_sort = None
 
-        similar_songs = [hit["_source"] for hit in hits]
-
         return {
-            "items": similar_songs,
+            "items": items,
             "total": response["hits"]["total"]["value"],
             "size": size,
             "sort_field": "_score",
             "sort_order": "desc",
             "search_after": last_sort
         }
-    except HTTPException as he:
-        raise he
     except Exception as e:
         logger.error(f"Error in get_similar_songs: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 @app.post("/songs/by_mood/{mood_slug}", response_model=PaginatedResponse)
 async def get_songs_by_mood(
@@ -336,39 +387,28 @@ async def get_songs_by_mood(
         body: dict = Body(...)
 ):
     """
-    Get songs by mood using mood slug with minimum confidence threshold, using search_after for pagination
+    Get songs by a specific mood, using search_after for pagination
     """
     try:
+        mood_name = map_slug_to_mood(mood_slug)
         size = body.get('size', 12)
         sort_field = body.get('sort_field', 'popularity')
         sort_order = body.get('sort_order', 'desc')
         search_after = body.get('search_after')
-        min_confidence = body.get('min_confidence', 0.5)
-
-        # Map slug to mood name
-        mood = map_slug_to_mood(mood_slug)
-        logger.info(f"Searching for mood: {mood} (slug: {mood_slug})")
-
-        query = {
-            "nested": {
-                "path": "moods",
-                "query": {
-                    "bool": {
-                        "must": [
-                            {"term": {"moods.mood": mood}},
-                            {"range": {"moods.confidence": {"gte": min_confidence}}}
-                        ]
-                    }
-                }
-            }
-        }
 
         search_query = {
-            "query": query,
+            "query": {
+                "nested": {
+                    "path": "moods",
+                    "query": {
+                        "term": {"moods.mood": mood_name}
+                    }
+                }
+            },
             "size": size,
             "sort": [
                 {sort_field: sort_order},
-                {"track_id": "asc"}  # Ensure uniqueness
+                {"track_id": "asc"}
             ],
             "track_total_hits": True
         }
@@ -376,28 +416,29 @@ async def get_songs_by_mood(
         if search_after:
             search_query["search_after"] = search_after
 
-        response = es.search(
-            index="songs",
-            body=search_query
-        )
+        response = es.search(index="songs", body=search_query)
 
         hits = response["hits"]["hits"]
+        items = []
         if hits:
             last_sort = hits[-1]["sort"]
+            # Fetch Spotify URLs and append to items
+            for hit in hits:
+                song = hit["_source"]
+                spotify_url = fetch_spotify_url(song['title'], song['artist'])
+                song['spotify_url'] = spotify_url
+                items.append(song)
         else:
             last_sort = None
 
         return {
-            "items": [hit["_source"] for hit in hits],
+            "items": items,
             "total": response["hits"]["total"]["value"],
             "size": size,
             "sort_field": sort_field,
             "sort_order": sort_order,
             "search_after": last_sort
         }
-
-    except HTTPException as he:
-        raise he
     except Exception as e:
         logger.error(f"Error in get_songs_by_mood: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -407,54 +448,42 @@ async def get_songs_by_multiple_moods(
         body: dict = Body(...)
 ):
     """
-    Get songs that match multiple moods using mood slugs, using search_after for pagination
+    Get songs matching multiple moods, using search_after for pagination
     """
     try:
-        moods_slugs = body.get('moods', [])
-        if not moods_slugs:
-            raise HTTPException(status_code=400, detail="At least one mood slug must be provided.")
-        if len(moods_slugs) > 3:
-            raise HTTPException(status_code=400, detail="Maximum of 3 moods allowed.")
-
+        moods = body.get('moods')
         size = body.get('size', 12)
         sort_field = body.get('sort_field', 'popularity')
         sort_order = body.get('sort_order', 'desc')
         search_after = body.get('search_after')
-        min_confidence = body.get('min_confidence', 0.5)
 
-        # Map slugs to mood names
-        moods = [map_slug_to_mood(slug) for slug in moods_slugs]
-        logger.info(f"Searching for moods: {moods} (slugs: {moods_slugs})")
+        if not moods:
+            raise HTTPException(status_code=400, detail="No moods provided")
 
-        mood_conditions = []
-        for mood in moods:
-            mood_conditions.append({
+        mood_names = [map_slug_to_mood(slug) for slug in moods]
+
+        # Build nested queries for each mood
+        nested_must_conditions = []
+        for mood_name in mood_names:
+            nested_must_conditions.append({
                 "nested": {
                     "path": "moods",
                     "query": {
-                        "bool": {
-                            "must": [
-                                {"term": {"moods.mood": mood}},
-                                {"range": {"moods.confidence": {"gte": min_confidence}}}
-                            ]
-                        }
+                        "term": {"moods.mood": mood_name}
                     }
                 }
             })
 
-        query = {
-            "bool": {
-                "should": mood_conditions,
-                "minimum_should_match": 1
-            }
-        }
-
         search_query = {
-            "query": query,
+            "query": {
+                "bool": {
+                    "must": nested_must_conditions
+                }
+            },
             "size": size,
             "sort": [
                 {sort_field: sort_order},
-                {"track_id": "asc"}  # Ensure uniqueness
+                {"track_id": "asc"}
             ],
             "track_total_hits": True
         }
@@ -462,19 +491,23 @@ async def get_songs_by_multiple_moods(
         if search_after:
             search_query["search_after"] = search_after
 
-        response = es.search(
-            index="songs",
-            body=search_query
-        )
+        response = es.search(index="songs", body=search_query)
 
         hits = response["hits"]["hits"]
+        items = []
         if hits:
             last_sort = hits[-1]["sort"]
+            # Fetch Spotify URLs and append to items
+            for hit in hits:
+                song = hit["_source"]
+                spotify_url = fetch_spotify_url(song['title'], song['artist'])
+                song['spotify_url'] = spotify_url
+                items.append(song)
         else:
             last_sort = None
 
         return {
-            "items": [hit["_source"] for hit in hits],
+            "items": items,
             "total": response["hits"]["total"]["value"],
             "size": size,
             "sort_field": sort_field,
@@ -493,87 +526,24 @@ async def get_songs_by_artist(
         body: dict = Body(...)
 ):
     """
-    Get songs by artist name (supports partial matches), using search_after for pagination
+    Get songs by artist name, using search_after for pagination
     """
     try:
-        artist = body.get('artist')
-        if not artist:
-            raise HTTPException(status_code=400, detail="Artist name must be provided.")
-
+        artist_name = body.get('artist_name')
+        if not artist_name:
+            raise HTTPException(status_code=400, detail="Artist name is required")
         size = body.get('size', 12)
         sort_field = body.get('sort_field', 'popularity')
         sort_order = body.get('sort_order', 'desc')
         search_after = body.get('search_after')
 
-        query = {
-            "match": {
-                "artist": {
-                    "query": artist,
-                    "fuzziness": "AUTO"
-                }
-            }
-        }
-
-        search_query = {
-            "query": query,
-            "size": size,
-            "sort": [
-                {sort_field: sort_order},
-                {"track_id": "asc"}
-            ],
-            "track_total_hits": True
-        }
-
-        if search_after:
-            search_query["search_after"] = search_after
-
-        response = es.search(
-            index="songs",
-            body=search_query
-        )
-
-        hits = response["hits"]["hits"]
-        if hits:
-            last_sort = hits[-1]["sort"]
-        else:
-            last_sort = None
-
-        return {
-            "items": [hit["_source"] for hit in hits],
-            "total": response["hits"]["total"]["value"],
-            "size": size,
-            "sort_field": sort_field,
-            "sort_order": sort_order,
-            "search_after": last_sort
-        }
-    except Exception as e:
-        logger.error(f"Error in get_songs_by_artist: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/songs/search", response_model=PaginatedResponse)
-async def search_songs(
-        body: dict = Body(...)
-):
-    """
-    Search songs by title, artist, or album, using search_after for pagination
-    """
-    try:
-        query_text = body.get('query')
-        if not query_text:
-            raise HTTPException(status_code=400, detail="Query text must be provided.")
-
-        size = body.get('size', 12)
-        sort_field = body.get('sort_field', '_score')
-        sort_order = body.get('sort_order', 'desc')
-        search_after = body.get('search_after')
-
         search_query = {
             "query": {
-                "multi_match": {
-                    "query": query_text,
-                    "fields": ["title^3", "artist^2", "album"],
-                    "fuzziness": "AUTO",
-                    "operator": "or"
+                "match": {
+                    "artist": {
+                        "query": artist_name,
+                        "fuzziness": "AUTO"
+                    }
                 }
             },
             "size": size,
@@ -587,25 +557,97 @@ async def search_songs(
         if search_after:
             search_query["search_after"] = search_after
 
-        response = es.search(
-            index="songs",
-            body=search_query
-        )
+        response = es.search(index="songs", body=search_query)
 
         hits = response["hits"]["hits"]
+        items = []
         if hits:
             last_sort = hits[-1]["sort"]
+            # Fetch Spotify URLs and append to items
+            for hit in hits:
+                song = hit["_source"]
+                spotify_url = fetch_spotify_url(song['title'], song['artist'])
+                song['spotify_url'] = spotify_url
+                items.append(song)
         else:
             last_sort = None
 
         return {
-            "items": [hit["_source"] for hit in hits],
+            "items": items,
             "total": response["hits"]["total"]["value"],
             "size": size,
             "sort_field": sort_field,
             "sort_order": sort_order,
             "search_after": last_sort
         }
+
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Error in get_songs_by_artist: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/songs/search", response_model=PaginatedResponse)
+async def search_songs(
+        body: dict = Body(...)
+):
+    """
+    General search endpoint for songs, using search_after for pagination
+    """
+    try:
+        query = body.get('query')
+        if not query:
+            raise HTTPException(status_code=400, detail="Search query is required")
+        size = body.get('size', 12)
+        sort_field = body.get('sort_field', 'popularity')
+        sort_order = body.get('sort_order', 'desc')
+        search_after = body.get('search_after')
+
+        search_query = {
+            "query": {
+                "multi_match": {
+                    "query": query,
+                    "fields": ["title^3", "artist^2", "album"],
+                    "fuzziness": "AUTO"
+                }
+            },
+            "size": size,
+            "sort": [
+                {sort_field: sort_order},
+                {"track_id": "asc"}
+            ],
+            "track_total_hits": True
+        }
+
+        if search_after:
+            search_query["search_after"] = search_after
+
+        response = es.search(index="songs", body=search_query)
+
+        hits = response["hits"]["hits"]
+        items = []
+        if hits:
+            last_sort = hits[-1]["sort"]
+            # Fetch Spotify URLs and append to items
+            for hit in hits:
+                song = hit["_source"]
+                spotify_url = fetch_spotify_url(song['title'], song['artist'])
+                song['spotify_url'] = spotify_url
+                items.append(song)
+        else:
+            last_sort = None
+
+        return {
+            "items": items,
+            "total": response["hits"]["total"]["value"],
+            "size": size,
+            "sort_field": sort_field,
+            "sort_order": sort_order,
+            "search_after": last_sort
+        }
+
+    except HTTPException as he:
+        raise he
     except Exception as e:
         logger.error(f"Error in search_songs: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -613,6 +655,7 @@ async def search_songs(
 # Startup Event: Check Elasticsearch Connection and Index
 @app.on_event("startup")
 def startup_event():
+    global sp
     try:
         if not es.ping():
             logger.error("Cannot connect to Elasticsearch")
@@ -626,6 +669,12 @@ def startup_event():
         else:
             doc_count = es.count(index="songs")["count"]
             logger.info(f"Index 'songs' exists with {doc_count} documents")
+
+        SPOTIFY_CLIENT_ID = "e90f1b66779d476fb11f86b325778c45"
+        SPOTIFY_CLIENT_SECRET = "0836c55b44f74807bb779c35adf9a392"
+        sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET))
+        logger.info("Successfully connected to Spotify API")
+
     except Exception as e:
         logger.error(f"Startup Error: {e}")
         raise
@@ -644,7 +693,6 @@ async def root():
             "/songs/by_multiple_moods",
             "/songs/by_artist",
             "/songs/search"
-            # ... other endpoints ...
         ]
     }
 

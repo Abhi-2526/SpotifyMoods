@@ -1,21 +1,21 @@
 import React, { useState, useEffect, memo, useCallback } from 'react';
-import { Search, Music, Star, Heart } from 'lucide-react';
+import { Search, Music, Star, Heart, ExternalLink } from 'lucide-react';
 
 // API URL constant
 const API_URL = 'http://localhost:8000';
 
-// Define moods with slugs
+// Define moods with slugs and colors
 const MOODS = [
-  { name: 'Energetic', slug: 'energetic' },
-  { name: 'Danceable', slug: 'danceable' },
-  { name: 'Electronic', slug: 'electronic' },
-  { name: 'Upbeat', slug: 'upbeat' },
-  { name: 'Dark', slug: 'dark' },
-  { name: 'Acoustic', slug: 'acoustic' },
-  { name: 'Melancholic', slug: 'melancholic' },
-  { name: 'Dark Dance', slug: 'dark-dance' },
-  { name: 'Calm', slug: 'calm' },
-  { name: 'Moderate Energy', slug: 'moderate-energy' }
+  { name: 'Energetic', slug: 'energetic', color: 'bg-red-200 text-red-800' },
+  { name: 'Danceable', slug: 'danceable', color: 'bg-pink-200 text-pink-800' },
+  { name: 'Electronic', slug: 'electronic', color: 'bg-purple-200 text-purple-800' },
+  { name: 'Upbeat', slug: 'upbeat', color: 'bg-yellow-200 text-yellow-800' },
+  { name: 'Dark', slug: 'dark', color: 'bg-gray-800 text-gray-100' },
+  { name: 'Acoustic', slug: 'acoustic', color: 'bg-green-200 text-green-800' },
+  { name: 'Melancholic', slug: 'melancholic', color: 'bg-blue-200 text-blue-800' },
+  { name: 'Dark Dance', slug: 'dark-dance', color: 'bg-indigo-200 text-indigo-800' },
+  { name: 'Calm', slug: 'calm', color: 'bg-teal-200 text-teal-800' },
+  { name: 'Moderate Energy', slug: 'moderate-energy', color: 'bg-orange-200 text-orange-800' },
 ];
 
 // Memoized SearchBar component
@@ -42,24 +42,31 @@ const SearchBar = memo(({ searchTerm, setSearchTerm, handleSearch }) => (
 // SongCard Component
 const SongCard = ({ song, isSelected, onSelect }) => {
   const getMoodColor = (type) => {
-    switch(type) {
-      case 'primary': return 'bg-indigo-100 text-indigo-800';
-      case 'secondary': return 'bg-purple-100 text-purple-800';
-      case 'weak': return 'bg-gray-100 text-gray-800';
-      default: return 'bg-blue-100 text-blue-800';
+    switch (type) {
+      case 'primary':
+        return 'bg-indigo-100 text-indigo-800';
+      case 'secondary':
+        return 'bg-purple-100 text-purple-800';
+      case 'weak':
+        return 'bg-gray-100 text-gray-800';
+      default:
+        return 'bg-blue-100 text-blue-800';
     }
   };
 
   return (
     <div
+      onClick={() => onSelect(song)}
       className={`bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow p-4 cursor-pointer ${
         isSelected ? 'ring-2 ring-indigo-500' : ''
       }`}
-      onClick={() => onSelect(song)}
     >
       <div className="flex justify-between items-start mb-2">
         <div className="flex-1">
-          <h3 className="font-semibold text-gray-900 truncate">{song.title}</h3>
+          {/* Fixed the song title overflow issue by allowing text wrapping */}
+          <h3 className="font-semibold text-gray-900 whitespace-normal break-words">
+            {song.title}
+          </h3>
           <p className="text-sm text-gray-600 truncate">{song.artist}</p>
         </div>
         {song.popularity >= 80 && (
@@ -71,7 +78,9 @@ const SongCard = ({ song, isSelected, onSelect }) => {
         {song.moods?.map((mood, index) => (
           <span
             key={index}
-            className={`text-xs px-2 py-1 rounded-full ${getMoodColor(mood.type)} flex items-center`}
+            className={`text-xs px-2 py-1 rounded-full ${getMoodColor(
+              mood.type
+            )} flex items-center`}
             title={`Confidence: ${Math.round(mood.confidence * 100)}%`}
           >
             {mood.mood}
@@ -93,6 +102,20 @@ const SongCard = ({ song, isSelected, onSelect }) => {
           <span className="ml-1">{song.popularity}%</span>
         </div>
       </div>
+
+      {/* Add Spotify Button */}
+      {song.spotify_url && (
+        <a
+          href={song.spotify_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-3 inline-flex items-center text-sm text-green-600 hover:text-green-800"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ExternalLink className="w-4 h-4 mr-1" />
+          Play on Spotify
+        </a>
+      )}
     </div>
   );
 };
@@ -125,12 +148,14 @@ function MusicApp() {
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
-        throw new Error(errorData?.detail || `HTTP error! status: ${response.status}`);
+        throw new Error(
+          errorData?.detail || `HTTP error! status: ${response.status}`
+        );
       }
 
       const data = await response.json();
@@ -141,7 +166,7 @@ function MusicApp() {
 
       // Update results count
       if (body.search_after) {
-        setResultsCount(prev => prev + data.items.length);
+        setResultsCount((prev) => prev + data.items.length);
       } else {
         setResultsCount(data.items.length);
       }
@@ -152,7 +177,6 @@ function MusicApp() {
       } else {
         setSearchAfterStack([]);
       }
-
     } catch (err) {
       console.error('Error fetching songs:', err);
       setError(`Failed to fetch songs: ${err.message}`);
@@ -163,16 +187,19 @@ function MusicApp() {
   };
 
   // Memoized fetch function for filtered songs
-  const fetchFilteredSongs = useCallback((searchAfter = null, moods = selectedMoodSlugs) => {
-    const body = {
-      size: pageSize,
-      query: searchTerm.trim() || undefined,
-      moods: moods.length > 0 ? moods : undefined,
-      search_after: searchAfter,
-    };
+  const fetchFilteredSongs = useCallback(
+    (searchAfter = null, moods = selectedMoodSlugs) => {
+      const body = {
+        size: pageSize,
+        query: searchTerm.trim() || undefined,
+        moods: moods.length > 0 ? moods : undefined,
+        search_after: searchAfter,
+      };
 
-    fetchSongs('/songs/search_with_filters', body);
-  }, [pageSize, searchTerm, fetchSongs]);
+      fetchSongs('/songs/search_with_filters', body);
+    },
+    [pageSize, searchTerm, selectedMoodSlugs]
+  );
 
   // Event handlers
   const handleSearch = (e) => {
@@ -187,7 +214,7 @@ function MusicApp() {
     // Compute new moods before updating state
     let newSelectedMoods;
     if (selectedMoodSlugs.includes(moodSlug)) {
-      newSelectedMoods = selectedMoodSlugs.filter(m => m !== moodSlug);
+      newSelectedMoods = selectedMoodSlugs.filter((m) => m !== moodSlug);
     } else if (selectedMoodSlugs.length < 3) {
       newSelectedMoods = [...selectedMoodSlugs, moodSlug];
     } else {
@@ -228,7 +255,7 @@ function MusicApp() {
     setCurrentSearchAfter(prevSearchAfter);
 
     // Update results count
-    setResultsCount(prev => prev - songs.length);
+    setResultsCount((prev) => prev - songs.length);
 
     if (viewMode === 'similar' && selectedSong) {
       fetchSongs(`/songs/similar/${selectedSong.track_id}`, {
@@ -252,7 +279,7 @@ function MusicApp() {
     setSearchAfterStack([]);
     setResultsCount(0);
     fetchSongs(`/songs/similar/${song.track_id}`, {
-      size: pageSize
+      size: pageSize,
     });
   };
 
@@ -265,7 +292,7 @@ function MusicApp() {
     setSearchTerm('');
     setResultsCount(0);
     fetchSongs('/songs/featured', {
-      size: pageSize
+      size: pageSize,
     });
   };
 
@@ -277,7 +304,7 @@ function MusicApp() {
     setSearchAfterStack([]);
     setResultsCount(0);
     fetchSongs('/songs/featured', {
-      size: pageSize
+      size: pageSize,
     });
   }, []);
 
@@ -292,12 +319,9 @@ function MusicApp() {
           Showing{' '}
           <span className="font-medium">
             {resultsCount - songs.length + 1}
-          </span>
-          {' '} - {' '}
-          <span className="font-medium">
-            {resultsCount}
-          </span>
-          {' '} of {' '}
+          </span>{' '}
+          -{' '}
+          <span className="font-medium">{resultsCount}</span> of{' '}
           <span className="font-medium">{totalItems}</span> results
         </div>
         <div>
@@ -321,7 +345,7 @@ function MusicApp() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-blue-100">
       {/* Header */}
       <nav className="bg-white shadow-sm sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -359,19 +383,26 @@ function MusicApp() {
 
             {/* Mood Selection */}
             <div className="mb-8">
-              <h3 className="text-lg font-semibold mb-4 text-gray-900">Mood Filters</h3>
-              <div className="flex flex-wrap gap-2">{MOODS.map((mood) => (
+              <h3 className="text-lg font-semibold mb-4 text-gray-900">
+                Mood Filters
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {MOODS.map((mood) => (
                   <button
                     key={mood.slug}
                     onClick={() => handleMoodSelection(mood.slug)}
                     className={`px-4 py-2 rounded-full text-sm font-medium transition-colors relative ${
                       selectedMoodSlugs.includes(mood.slug)
-                        ? 'bg-indigo-600 text-white shadow-md'
+                        ? `${mood.color} shadow-md`
                         : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                     }`}
-                    disabled={!selectedMoodSlugs.includes(mood.slug) && selectedMoodSlugs.length >= 3}
+                    disabled={
+                      !selectedMoodSlugs.includes(mood.slug) &&
+                      selectedMoodSlugs.length >= 3
+                    }
                     title={
-                      !selectedMoodSlugs.includes(mood.slug) && selectedMoodSlugs.length >= 3
+                      !selectedMoodSlugs.includes(mood.slug) &&
+                      selectedMoodSlugs.length >= 3
                         ? 'You can select up to 3 moods'
                         : ''
                     }
@@ -386,7 +417,8 @@ function MusicApp() {
                 ))}
               </div>
               <div className="mt-2 text-sm text-gray-500">
-                Select up to 3 moods to filter songs. Results will show songs matching all of the selected moods.
+                Select up to 3 moods to filter songs. Results will show songs
+                matching all of the selected moods.
               </div>
             </div>
           </>
@@ -427,9 +459,7 @@ function MusicApp() {
             </div>
 
             {/* Pagination */}
-            {songs.length > 0 && (
-              <Pagination />
-            )}
+            {songs.length > 0 && <Pagination />}
 
             {/* No Results Message */}
             {!loading && songs.length === 0 && (
