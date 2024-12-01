@@ -613,10 +613,11 @@ async def search_songs(
             },
             "size": size,
             "sort": [
-                {sort_field: sort_order},
+                "_score",
+                {"popularity": "desc"},
                 {"track_id": "asc"}
             ],
-            "track_total_hits": True
+            "min_score": 0.1
         }
 
         if search_after:
@@ -699,7 +700,7 @@ async def root():
 if __name__ == "__main__":
     # Start the server
     uvicorn.run(
-        "backend:app",  # Assuming your file is named backend.py
+        "backend:app",
         host="0.0.0.0",
         port=8000,
         log_level="info"

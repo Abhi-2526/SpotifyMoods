@@ -1,0 +1,96 @@
+# Elasticsearch Features Demonstrated in Backend
+
+## 1. Text Search Capabilities
+- **Multi-match Queries**
+  - Search across multiple fields (title, artist, album)
+  - Field boosting: title^3, artist^2, album^1
+  - Fuzzy matching with "AUTO" fuzziness
+
+- **Term-level Queries**
+  - Exact matching for mood terms
+  - Range queries for popularity filtering
+
+## 2. Complex Queries
+- **Nested Queries**
+  ```json
+  {
+    "nested": {
+      "path": "moods",
+      "query": {
+        "term": {"moods.mood": mood_name}
+      }
+    }
+  }
+  ```
+  Used for searching nested mood objects
+
+- **Bool Queries**
+  ```json
+  {
+    "bool": {
+      "must": [nested_must_conditions]
+    }
+  }
+  ```
+  Combining multiple conditions with AND logic
+
+## 3. Similarity Search
+- **Script Score Queries**
+  - Cosine similarity calculation
+  - Feature vector comparison
+  - Custom scoring
+  ```json
+  {
+    "script_score": {
+      "query": { ... },
+      "script": {
+        "source": "cosineSimilarity(params.target_vector, 'feature_vector')"
+      }
+    }
+  }
+  ```
+
+## 4. Pagination & Sorting
+- **Deep Pagination**
+  - search_after parameter for efficient deep pagination
+  - Compound sort for consistent ordering
+  ```json
+  "sort": [
+    {sort_field: sort_order},
+    {"track_id": "asc"}
+  ]
+  ```
+
+- **Track Total Hits**
+  ```json
+  "track_total_hits": true
+  ```
+  For accurate result counting
+
+## 5. Aggregations & Filters
+- **Range Aggregations**
+  - Popularity filtering
+  - Min/max thresholds
+
+- **Term Filters**
+  - Mood-based filtering
+  - Artist filtering
+
+## 6. Index Management
+- **Index Operations**
+  - Index existence checks
+  - Document count retrieval
+  ```python
+  es.indices.exists(index="songs")
+  es.count(index="songs")
+  ```
+
+## 7. Error Handling
+- **NotFoundError** handling
+- Connection error management
+- Query error handling
+
+## 8. Performance Features
+- Connection pooling
+- HTTP connection management
+- Efficient query structure
