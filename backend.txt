@@ -1,0 +1,197 @@
+# Music Search API Documentation
+
+## Overview
+This API provides endpoints for searching and retrieving music tracks based on various criteria including moods, artists, and audio features. The API integrates with Elasticsearch for data storage and search, and Spotify for additional track information.
+
+## Base URL
+`http://localhost:8000`
+
+## Common Response Format
+All endpoints return a `PaginatedResponse` with the following structure:
+```json
+{
+    "items": List[SongResponse],
+    "total": int,
+    "size": int,
+    "search_after": Optional[List],
+    "sort_field": str,
+    "sort_order": str
+}
+```
+
+## Available Moods
+The API supports the following mood classifications:
+- energetic
+- danceable
+- electronic
+- upbeat
+- dark
+- acoustic
+- melancholic
+- dark-dance
+- calm
+- moderate-energy
+
+## Endpoints
+
+### 1. Search with Filters
+**POST** `/songs/search_with_filters`
+
+Search songs with text query and mood filters.
+
+**Request Body:**
+```json
+{
+    "query": string,          // Optional text search
+    "moods": List[string],    // Optional mood slugs
+    "size": int,              // Default: 12
+    "sort_field": string,     // Default: "popularity"
+    "sort_order": string,     // Default: "desc"
+    "search_after": List      // Optional pagination token
+}
+```
+
+Features:
+- Fuzzy text search across title, artist, and album fields
+- Multiple mood filtering with AND logic
+- Deep pagination using search_after token
+
+### 2. Featured Songs
+**POST** `/songs/featured`
+
+Get popular songs based on popularity score.
+
+**Request Body:**
+```json
+{
+    "size": int,              // Default: 12
+    "sort_field": string,     // Default: "popularity"
+    "sort_order": string,     // Default: "desc"
+    "search_after": List,     // Optional pagination token
+    "min_popularity": int     // Default: 70
+}
+```
+
+### 3. Similar Songs
+**POST** `/songs/similar/{track_id}`
+
+Find songs with similar audio features using cosine similarity.
+
+**Path Parameters:**
+- track_id: string (required)
+
+**Request Body:**
+```json
+{
+    "size": int,              // Default: 12
+    "search_after": List,     // Optional pagination token
+    "min_score": float       // Default: 0.8
+}
+```
+
+Features:
+- Uses 12-dimensional feature vector including:
+  - danceability
+  - energy
+  - valence
+  - normalized tempo
+  - speechiness
+  - acousticness
+  - instrumentalness
+  - liveness
+  - normalized loudness
+  - mode
+  - key (sin/cos transformed)
+- L2 normalization applied to vectors
+- Excludes the input track from results
+
+### 4. Songs by Mood
+**POST** `/songs/by_mood/{mood_slug}`
+
+Get songs matching a specific mood.
+
+**Path Parameters:**
+- mood_slug: string (required)
+
+**Request Body:**
+```json
+{
+    "size": int,              // Default: 12
+    "sort_field": string,     // Default: "popularity"
+    "sort_order": string,     // Default: "desc"
+    "search_after": List      // Optional pagination token
+}
+```
+
+### 5. Songs by Multiple Moods
+**POST** `/songs/by_multiple_moods`
+
+Get songs matching all specified moods.
+
+**Request Body:**
+```json
+{
+    "moods": List[string],    // Required mood slugs
+    "size": int,              // Default: 12
+    "sort_field": string,     // Default: "popularity"
+    "sort_order": string,     // Default: "desc"
+    "search_after": List      // Optional pagination token
+}
+```
+
+### 6. Songs by Artist
+**POST** `/songs/by_artist`
+
+Search songs by artist name with fuzzy matching.
+
+**Request Body:**
+```json
+{
+    "artist_name": string,    // Required
+    "size": int,              // Default: 12
+    "sort_field": string,     // Default: "popularity"
+    "sort_order": string,     // Default: "desc"
+    "search_after": List      // Optional pagination token
+}
+```
+
+### 7. General Search
+**POST** `/songs/search`
+
+Search songs across title, artist, and album fields.
+
+**Request Body:**
+```json
+{
+    "query": string,          // Required
+    "size": int,              // Default: 12
+    "sort_field": string,     // Default: "popularity"
+    "sort_order": string,     // Default: "desc"
+    "search_after": List      // Optional pagination token
+}
+```
+
+Features:
+- Boosted field weights: title (3x), artist (2x), album (1x)
+- Fuzzy matching enabled
+
+## Special Features
+
+### Spotify Integration
+- Each song response includes a Spotify URL when available
+- URLs are fetched dynamically using the Spotify API
+
+### Pagination
+- Uses Elasticsearch's search_after for deep pagination
+- Maintains consistent ordering with compound sort
+- Returns total hit count and next page token
+
+### Error Handling
+- Detailed error responses with appropriate HTTP status codes
+- Extensive logging for debugging
+- Graceful handling of Elasticsearch and Spotify API failures
+
+### Performance Features
+- CORS enabled for cross-origin requests
+- Connection pooling for Elasticsearch
+- Efficient nested queries for mood filtering
