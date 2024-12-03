@@ -66,7 +66,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install fastapi uvicorn elasticsearch pandas spotipy tqdm
 ```
 
-3. Set up Spotify API credentials:
+3. Set up Spotify API credentials (or use the ones in the code):
    - Create an application in the Spotify Developer Dashboard
    - Get your Client ID and Client Secret
    - Update the credentials in the backend code
@@ -93,7 +93,7 @@ pip install fastapi uvicorn elasticsearch pandas spotipy tqdm
      - time_signature
      - track_genre (optional)
 
-5. Index your data:
+5. Index your data (2 min process):
 ```bash
 python index.py
 ```
