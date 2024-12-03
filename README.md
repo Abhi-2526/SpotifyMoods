@@ -49,6 +49,7 @@ docker run -d --name elasticsearch \
   -e "xpack.security.http.ssl.enabled=false" \
   -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" \
   docker.elastic.co/elasticsearch/elasticsearch:8.12.0 (elasticsearch in docker container)
+
 curl http://localhost:9200 (check docker is running)
 ```
 
