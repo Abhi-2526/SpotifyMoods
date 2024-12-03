@@ -95,7 +95,7 @@ pip install fastapi uvicorn elasticsearch pandas spotipy tqdm
 
 5. Index your data:
 ```bash
-python indexer.py
+python index.py
 ```
 
 6. Start the backend server:
