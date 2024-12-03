@@ -152,7 +152,11 @@ npm run dev
 - Calm
 - Moderate Energy
 
-Demo Video:
+Demo Video: 
+
+https://github.com/user-attachments/assets/30750533-9094-400a-ac41-7568fc184183
+
+
 
 
 ## License
