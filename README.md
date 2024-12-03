@@ -30,18 +30,26 @@ A full-stack application for music discovery that uses audio features and mood d
 
 1. Python 3.8+
 2. Node.js 14+
-3. Elasticsearch 7.x
+3. Elasticsearch 8.x
 4. Spotify Developer Account
 
 ## Installation
 
 ### 1. Elasticsearch Setup
 
-1. Download and install Elasticsearch 7.x from the official website
+1. Download and install Elasticsearch 8.x from the official website or use docker container (make sure that docker daemon is running)
 2. Start Elasticsearch service
 3. Verify it's running:
 ```bash
-curl http://localhost:9200
+docker run -d --name elasticsearch \
+  -p 9200:9200 \
+  -p 9300:9300 \
+  -e "discovery.type=single-node" \
+  -e "xpack.security.enabled=false" \
+  -e "xpack.security.http.ssl.enabled=false" \
+  -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" \
+  docker.elastic.co/elasticsearch/elasticsearch:8.12.0 (elasticsearch in docker container)
+curl http://localhost:9200 (check docker is running)
 ```
 
 ### 2. Backend Setup
