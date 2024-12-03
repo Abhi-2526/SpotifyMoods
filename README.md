@@ -105,13 +105,12 @@ uvicorn backend:app --host 0.0.0.0 --port 8000 --reload
 
 ### 3. Frontend Setup
 
-1. Create a new React application:
+1. In another terminal, go to UI code
 ```bash
-npx create-react-app music-discovery
-cd music-discovery
+cd SpotifyMood/my-music-app/src/
 ```
 
-2. Install required dependencies:
+3. Install required dependencies:
 ```bash
 npm install lucide-react tailwindcss @tailwindcss/forms
 ```
@@ -127,7 +126,7 @@ npx tailwindcss init
 
 6. Start the development server:
 ```bash
-npm start
+npm run dev
 ```
 
 ## API Endpoints
@@ -153,62 +152,8 @@ npm start
 - Calm
 - Moderate Energy
 
-## Development Notes
+Demo Video:
 
-### Backend Considerations
-
-1. **Error Handling**: The application includes comprehensive error handling and logging
-2. **Rate Limiting**: Consider implementing rate limiting for production
-3. **Caching**: Implement caching for frequently accessed data
-4. **Security**: Add authentication if needed
-5. **Spotify API**: Be mindful of Spotify API rate limits
-
-### Frontend Considerations
-
-1. **Performance**: Uses React.memo for optimized components
-2. **State Management**: Uses React hooks for state management
-3. **Responsive Design**: Implemented using Tailwind CSS
-4. **Error Handling**: Comprehensive error handling for API calls
-5. **Loading States**: Loading indicators for better UX
-
-## Production Deployment
-
-1. **Backend**:
-   - Use a production WSGI server (e.g., Gunicorn)
-   - Set up proper logging
-   - Configure CORS appropriately
-   - Use environment variables for sensitive data
-
-2. **Frontend**:
-   - Build the production version:
-   ```bash
-   npm run build
-   ```
-   - Serve using a proper web server
-   - Set up proper caching headers
-   - Configure environment variables
-
-3. **Elasticsearch**:
-   - Secure your Elasticsearch instance
-   - Set up proper authentication
-   - Configure backup strategy
-   - Monitor performance
-
-## Monitoring and Maintenance
-
-1. Set up logging and monitoring
-2. Regularly backup Elasticsearch indices
-3. Monitor Spotify API usage
-4. Keep dependencies updated
-5. Regular security audits
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
 
 ## License
 
