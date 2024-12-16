@@ -67,11 +67,6 @@ pip install fastapi uvicorn elasticsearch pandas spotipy tqdm
 ```
 
 3. Set up Spotify API credentials (or use the ones in the code):
-   ```bash
-   (in backend.py)
-   SPOTIFY_CLIENT_ID = "e90f1b66779d476fb11f86b325778c45"
-   SPOTIFY_CLIENT_SECRET = "0836c55b44f74807bb779c35adf9a392"
-   ```
    - Create an application in the Spotify Developer Dashboard
    - Get your Client ID and Client Secret
    - Update the credentials in the backend code
